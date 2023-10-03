@@ -508,6 +508,34 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
             witness
         };
 
+        // emulate circuit checks for native
+        {
+            let mut acc = e
+                .limbs
+                .iter()
+                .zip(self.bases_in_wrong.iter())
+                .enumerate()
+                .fold(N::ZERO, |acc, (_, (limb, base))| {
+                    let base = big_to_fe::<N>(base);
+                    acc + base * limb
+                });
+
+            let res = witness
+                .res
+                .limbs
+                .iter()
+                .zip(self.neg_bases_in_wrong.iter())
+                .enumerate()
+                .fold(N::ZERO, |acc, (_, (limb, base))| {
+                    let base = big_to_fe::<N>(base);
+                    acc + base * limb
+                });
+
+            acc += &res;
+            acc += witness.w_quotient * big_to_fe::<N>(&self.neg_wrong_in_native);
+            assert_eq!(acc, N::ZERO);
+        }
+
         // emulate circuit checks for m_1
         {
             let mut acc = e
@@ -826,6 +854,37 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
 
             witness
         };
+
+        // emulate circuit checks for native modulus
+        {
+            let mul = witness
+                .res
+                .limbs
+                .iter()
+                .enumerate()
+                .fold(N::ZERO, |acc, (i, w0_limb)| {
+                    acc + denom
+                        .limbs
+                        .iter()
+                        .enumerate()
+                        .fold(N::ZERO, |acc, (j, w1_limb)| {
+                            let base = big_to_fe::<N>(&self.bases_in_wrong[i + j]);
+                            acc + base * w0_limb * w1_limb
+                        })
+                });
+
+            let numer = numer.limbs.iter().zip(self.neg_bases_in_wrong.iter()).fold(
+                N::ZERO,
+                |acc, (limb, base)| {
+                    let base = big_to_fe::<N>(base);
+                    acc + base * limb
+                },
+            );
+
+            let acc = mul + numer + witness.w_quotient * big_to_fe::<N>(&self.neg_wrong_in_native);
+
+            assert_eq!(acc, N::ZERO);
+        }
 
         // emulate circuit checks for m_1
         {
