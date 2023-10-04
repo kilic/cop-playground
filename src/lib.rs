@@ -48,46 +48,38 @@ impl std::fmt::Debug for Integer {
     }
 }
 
-#[derive(Clone)]
-pub struct WitnessInteger<N: PrimeField> {
-    limbs: Vec<N>,
-    native: N,
-    max: BigUint,
-    max_values: Vec<BigUint>,
-}
+// impl<N: PrimeField> std::fmt::Debug for Integer {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         let mut debug = f.debug_struct("Integer");
 
-impl<N: PrimeField> std::fmt::Debug for WitnessInteger<N> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut debug = f.debug_struct("Integer");
+//         debug.field(
+//             "max:    ",
+//             &format!("{}, 0x{}", self.max.bits(), self.max.to_str_radix(16)),
+//         );
 
-        debug.field(
-            "max:    ",
-            &format!("{}, 0x{}", self.max.bits(), self.max.to_str_radix(16)),
-        );
+//         self.limbs
+//             .iter()
+//             .zip(self.max_values.iter())
+//             .enumerate()
+//             .for_each(|(_, (limb, max))| {
+//                 debug.field(
+//                     "limb:   ",
+//                     &format!("{}, 0x{}", max.bits(), fe_to_big(limb).to_str_radix(16)),
+//                 );
+//             });
+//         debug.finish()
+//     }
+// }
 
-        self.limbs
-            .iter()
-            .zip(self.max_values.iter())
-            .enumerate()
-            .for_each(|(_, (limb, max))| {
-                debug.field(
-                    "limb:   ",
-                    &format!("{}, 0x{}", max.bits(), fe_to_big(limb).to_str_radix(16)),
-                );
-            });
-        debug.finish()
-    }
-}
-
-impl<N: PrimeField> WitnessInteger<N> {
+impl Integer {
     pub fn add(&self, other: &Self) -> Self {
         let mut limbs = Vec::with_capacity(self.limbs.len());
         for (a, b) in self.limbs.iter().zip(other.limbs.iter()) {
-            limbs.push(*a + *b);
+            limbs.push(a + b);
         }
-        WitnessInteger {
+        Integer {
             limbs,
-            native: self.native + other.native,
+            value: &self.value + &other.value,
             max: &self.max + &other.max,
             max_values: self
                 .max_values
@@ -99,23 +91,22 @@ impl<N: PrimeField> WitnessInteger<N> {
     }
 
     pub fn value<W: PrimeField>(&self, limb_size: usize) -> W {
-        let limbs = self.limbs.iter().map(fe_to_big).collect::<Vec<_>>();
-        let value = compose(&limbs, limb_size);
+        let value = compose(&self.limbs, limb_size);
         big_to_fe(&value)
     }
 }
 
-pub(crate) struct ReductionWitness<N: PrimeField> {
-    pub(crate) res: WitnessInteger<N>,
-    pub(crate) w_quotient: N,
-    pub(crate) m_quotients: Vec<N>,
+pub struct ReductionWitness {
+    pub(crate) res: Integer,
+    pub(crate) w_quotient: BigUint,
+    pub(crate) m_quotients: Vec<BigUint>,
     pub(crate) _w_quotient_size: usize,
     pub(crate) _m_quotients_size: Vec<usize>,
 }
 
 #[derive(Debug)]
 // W doesn't have to be prime actually but we need this thread to use util functions
-pub struct COP<W: PrimeField, N: PrimeField> {
+pub struct COP {
     pub(crate) number_of_limbs: usize,
     pub(crate) limb_size: usize,
     pub(crate) m_set: Vec<BigUint>,
@@ -141,8 +132,6 @@ pub struct COP<W: PrimeField, N: PrimeField> {
 
     pub(crate) max_remainder: BigUint,
     pub(crate) max_remainder_limbs: Vec<BigUint>,
-
-    _marker: std::marker::PhantomData<(W, N)>,
 }
 
 fn prs_red_add(e: &Integer, bases: &[BigUint]) -> (BigUint, BigUint) {
@@ -179,11 +168,10 @@ fn prs_red_mul(e0: &Integer, e1: &Integer, bases: &[BigUint]) -> (BigUint, BigUi
     (max, value)
 }
 
-impl<W: PrimeField, N: PrimeField> COP<W, N> {
-    pub fn rand(&self, rng: &mut impl RngCore) -> WitnessInteger<N> {
+impl COP {
+    pub fn rand(&self, rng: &mut impl RngCore) -> Integer {
         let value = rng.gen_biguint_below(&self.max_remainder);
-        let int = self.new_int(&value);
-        self.int_to_witness(int)
+        self.new_int(&value)
     }
 
     pub fn new_int(&self, value: &BigUint) -> Integer {
@@ -196,35 +184,34 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
         }
     }
 
-    pub fn int_from_witness(&self, integer: &WitnessInteger<N>) -> Integer {
-        let limbs = integer
-            .limbs
-            .iter()
-            .map(|limb| fe_to_big(limb))
-            .collect::<Vec<_>>();
-        let value = compose(&limbs, self.limb_size);
+    // pub fn int_from_witness(&self, integer: &Integer) -> Integer {
+    //     let limbs = integer
+    //         .limbs
+    //         .iter()
+    //         .map(|limb| fe_to_big(limb))
+    //         .collect::<Vec<_>>();
+    //     let value = compose(&limbs, self.limb_size);
 
-        Integer {
-            max_values: integer.max_values.clone(),
-            max: compose(&integer.max_values, self.limb_size),
-            limbs,
-            value,
-        }
-    }
+    //     Integer {
+    //         max_values: integer.max_values.clone(),
+    //         max: compose(&integer.max_values, self.limb_size),
+    //         limbs,
+    //         value,
+    //     }
+    // }
 
-    pub fn int_to_witness(&self, integer: Integer) -> WitnessInteger<N> {
-        let limbs = integer
-            .limbs
-            .iter()
-            .map(|limb| big_to_fe::<N>(limb))
-            .collect::<Vec<_>>();
-        WitnessInteger {
-            max_values: integer.max_values.clone(),
-            max: integer.max,
-            limbs,
-            native: big_to_fe::<N>(&self.native),
-        }
-    }
+    // pub fn int_to_witness(&self, integer: Integer) -> Integer {
+    //     let limbs = integer
+    //         .limbs
+    //         .iter()
+    //         .map(|limb| big_to_fe::<N>(limb))
+    //         .collect::<Vec<_>>();
+    //     Integer            max_values: integer.max_values.clone(),
+    //         max: integer.max,
+    //         limbs,
+    //         native: big_to_fe::<N>(&self.native),
+    //     }
+    // }
 
     pub fn base(&self) -> &BigUint {
         &self.bases[1]
@@ -242,7 +229,8 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
     }
 
     pub fn new(
-        number_of_limbs: usize,
+        wrong_modulus: &BigUint,
+        native_modulus: &BigUint,
         limb_size: usize,
         overflow_size: usize,
         m_set: Option<Vec<BigUint>>,
@@ -253,14 +241,9 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
         // `b = 2^(limb_size+overflow_size)`
         let overflow_base = BigUint::one() << (limb_size + overflow_size);
 
-        let wrong_modulus = &modulus::<W>();
-        let native_modulus = &modulus::<N>();
-
         // guarantee that limb representation covers field elements in wrong field
-        assert_eq!(
-            div_ceil(wrong_modulus.bits() as usize, limb_size),
-            number_of_limbs
-        );
+        let number_of_limbs = div_ceil(wrong_modulus.bits() as usize, limb_size);
+
         // obviously wrong modulus must be in representation range that is `b^n >= p`
         assert!(wrong_modulus < &(BigUint::one() << (limb_size * number_of_limbs)));
 
@@ -420,14 +403,12 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
             neg_wrong_in_native,
             _wrong_in_m: wrong_in_m,
             neg_wrong_in_m,
-
-            _marker: std::marker::PhantomData,
         }
     }
 
-    pub fn reduction_witness(&self, e: &WitnessInteger<N>) {
+    pub fn red_witness(&self, e: &Integer) -> ReductionWitness {
         let witness = {
-            let e = self.int_from_witness(e);
+            // let e = self.int_from_witness(e);
 
             // find the result
             let res = {
@@ -490,12 +471,12 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
                 })
                 .unzip();
 
-            let w_quotient = big_to_fe::<N>(&w_quotient);
-            let res = self.int_to_witness(res);
-            let m_quotients = m_quotients
-                .iter()
-                .map(|m_quotient| big_to_fe::<N>(m_quotient))
-                .collect::<Vec<_>>();
+            // let w_quotient = big_to_fe::<N>(&w_quotient);
+            // let res = self.int_to_witness(res);
+            // let m_quotients = m_quotients
+            //     .iter()
+            //     .map(|m_quotient| big_to_fe::<N>(m_quotient))
+            //     .collect::<Vec<_>>();
 
             let witness = ReductionWitness {
                 res,
@@ -508,21 +489,37 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
             witness
         };
 
+        witness
+    }
+
+    pub fn ver_red<N: PrimeField>(&self, witness: &ReductionWitness, e: &Integer) {
+        assert_eq!(modulus::<N>(), self.native);
+
+        let e = e.limbs.iter().map(big_to_fe::<N>).collect::<Vec<_>>();
+        let res = witness
+            .res
+            .limbs
+            .iter()
+            .map(big_to_fe::<N>)
+            .collect::<Vec<_>>();
+        let w_quotient = big_to_fe::<N>(&witness.w_quotient);
+        let m_quotients = witness
+            .m_quotients
+            .iter()
+            .map(|m_quotient| big_to_fe::<N>(m_quotient))
+            .collect::<Vec<_>>();
+
         // emulate circuit checks for native
         {
-            let mut acc = e
-                .limbs
-                .iter()
-                .zip(self.bases_in_wrong.iter())
-                .enumerate()
-                .fold(N::ZERO, |acc, (_, (limb, base))| {
+            let mut acc = e.iter().zip(self.bases_in_wrong.iter()).enumerate().fold(
+                N::ZERO,
+                |acc, (_, (limb, base))| {
                     let base = big_to_fe::<N>(base);
                     acc + base * limb
-                });
+                },
+            );
 
-            let res = witness
-                .res
-                .limbs
+            let res = res
                 .iter()
                 .zip(self.neg_bases_in_wrong.iter())
                 .enumerate()
@@ -532,14 +529,13 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
                 });
 
             acc += &res;
-            acc += witness.w_quotient * big_to_fe::<N>(&self.neg_wrong_in_native);
+            acc += w_quotient * big_to_fe::<N>(&self.neg_wrong_in_native);
             assert_eq!(acc, N::ZERO);
         }
 
         // emulate circuit checks for m_1
         {
             let mut acc = e
-                .limbs
                 .iter()
                 .zip(self.bases_in_wrong_in_m[0].iter())
                 .enumerate()
@@ -548,9 +544,7 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
                     acc + base * limb
                 });
 
-            let res = witness
-                .res
-                .limbs
+            let res = res
                 .iter()
                 .zip(self.neg_bases_in_wrong_in_m[0].iter())
                 .enumerate()
@@ -560,25 +554,18 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
                 });
 
             acc += &res;
-            acc += witness.w_quotient * big_to_fe::<N>(&self.neg_wrong_in_m[0]);
-            acc -= witness.m_quotients[0] * big_to_fe::<N>(&self.m_set[0]);
+            acc += w_quotient * big_to_fe::<N>(&self.neg_wrong_in_m[0]);
+            acc -= m_quotients[0] * big_to_fe::<N>(&self.m_set[0]);
             assert_eq!(acc, N::ZERO);
         }
     }
 
-    pub fn mul_witness(
-        &self,
-        w0: &WitnessInteger<N>,
-        w1: &WitnessInteger<N>,
-        to_add: &[WitnessInteger<N>],
-    ) {
+    pub fn mul_witness(&self, w0: &Integer, w1: &Integer, to_add: &[Integer]) -> ReductionWitness {
         let witness = {
-            let w0 = self.int_from_witness(w0);
-            let w1 = self.int_from_witness(w1);
-            let to_add = to_add
-                .iter()
-                .map(|to_add| self.int_from_witness(to_add))
-                .collect::<Vec<_>>();
+            // let to_add = to_add
+            //     .iter()
+            //     .map(|to_add| self.int_from_witness(to_add))
+            //     .collect::<Vec<_>>();
 
             // find the result
             let res = {
@@ -646,9 +633,9 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
                             + max_to_add
                             + max_res
                             + &max_w_quotient * &self.neg_wrong_in_m[i];
-                        assert!(lhs < self.native);
+                        // assert!(lhs < self.native);
                         let (max_m_quotient, _) = lhs.div_rem(&self.wrong);
-                        assert!(max_m_quotient < self.quotient_w_max);
+                        // assert!(max_m_quotient < self.quotient_w_max);
                         max_m_quotient
                     };
 
@@ -659,13 +646,6 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
                     (max_m_quotient, m_quotient)
                 })
                 .unzip();
-
-            let w_quotient = big_to_fe::<N>(&w_quotient);
-            let res = self.int_to_witness(res);
-            let m_quotients = m_quotients
-                .iter()
-                .map(|m_quotient| big_to_fe::<N>(m_quotient))
-                .collect::<Vec<_>>();
 
             let witness = ReductionWitness {
                 res,
@@ -678,92 +658,68 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
             witness
         };
 
+        witness
+    }
+
+    pub fn ver_mul<N: PrimeField>(
+        &self,
+        witness: &ReductionWitness,
+        w0: &Integer,
+        w1: &Integer,
+        to_add: &[Integer],
+    ) {
+        assert_eq!(modulus::<N>(), self.native);
+        let w0 = w0.limbs.iter().map(big_to_fe::<N>).collect::<Vec<_>>();
+        let w1 = w1.limbs.iter().map(big_to_fe::<N>).collect::<Vec<_>>();
+        let res = witness
+            .res
+            .limbs
+            .iter()
+            .map(big_to_fe::<N>)
+            .collect::<Vec<_>>();
+        let w_quotient = big_to_fe::<N>(&witness.w_quotient);
+        let m_quotients = witness
+            .m_quotients
+            .iter()
+            .map(|m_quotient| big_to_fe::<N>(m_quotient))
+            .collect::<Vec<_>>();
+        let to_add = to_add
+            .iter()
+            .map(|to_add| to_add.limbs.iter().map(big_to_fe::<N>).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+
+        let mut mul = vec![N::ZERO; 2 * w0.len() - 1];
+        w0.iter().enumerate().for_each(|(i, w0)| {
+            w1.iter().enumerate().for_each(|(j, w1)| {
+                mul[i + j] += *w0 * *w1;
+            })
+        });
+
         // emulate circuit checks for native modulus
         {
-            let mul = w0
-                .limbs
+            let mul = mul
                 .iter()
+                .zip(self.bases_in_wrong.iter())
                 .enumerate()
-                .fold(N::ZERO, |acc, (i, w0_limb)| {
-                    acc + w1
-                        .limbs
-                        .iter()
-                        .enumerate()
-                        .fold(N::ZERO, |acc, (j, w1_limb)| {
-                            let base = big_to_fe::<N>(&self.bases_in_wrong[i + j]);
-                            acc + base * w0_limb * w1_limb
-                        })
-                });
+                .map(|(_, (limb, base))| *limb * big_to_fe::<N>(base))
+                .sum::<N>();
 
-            let res = witness
-                .res
-                .limbs
+            let res = res
                 .iter()
                 .zip(self.neg_bases_in_wrong.iter())
                 .enumerate()
                 .fold(N::ZERO, |acc, (_, (limb, base))| {
-                    let base = big_to_fe::<N>(base);
-                    acc + base * limb
-                });
-
-            let to_add = to_add
-                .iter()
-                .map(|to_add| {
-                    to_add.limbs.iter().zip(self.bases_in_wrong.iter()).fold(
-                        N::ZERO,
-                        |acc, (limb, base)| {
-                            let base = big_to_fe::<N>(base);
-                            acc + base * limb
-                        },
-                    )
-                })
-                .sum::<N>();
-
-            let mut acc = mul;
-            acc += res;
-            acc += to_add;
-            acc += witness.w_quotient * big_to_fe::<N>(&self.neg_wrong_in_native);
-            assert_eq!(acc, N::ZERO);
-        }
-
-        // emulate circuit checks for m_1
-        {
-            let mul = w0
-                .limbs
-                .iter()
-                .enumerate()
-                .fold(N::ZERO, |acc, (i, w0_limb)| {
-                    acc + w1
-                        .limbs
-                        .iter()
-                        .enumerate()
-                        .fold(N::ZERO, |acc, (j, w1_limb)| {
-                            let base = big_to_fe::<N>(&self.bases_in_wrong_in_m[0][i + j]);
-                            acc + base * w0_limb * w1_limb
-                        })
-                });
-
-            let res = witness
-                .res
-                .limbs
-                .iter()
-                .zip(self.neg_bases_in_wrong_in_m[0].iter())
-                .enumerate()
-                .fold(N::ZERO, |acc, (_, (limb, base))| {
-                    let base = big_to_fe::<N>(base);
-                    acc + base * limb
+                    acc + *limb * big_to_fe::<N>(base)
                 });
 
             let to_add = to_add
                 .iter()
                 .map(|to_add| {
                     to_add
-                        .limbs
                         .iter()
-                        .zip(self.bases_in_wrong_in_m[0].iter())
+                        .zip(self.bases_in_wrong.iter())
                         .fold(N::ZERO, |acc, (limb, base)| {
-                            let base = big_to_fe::<N>(base);
-                            acc + base * limb
+                            acc + *limb * big_to_fe::<N>(base)
                         })
                 })
                 .sum::<N>();
@@ -771,16 +727,56 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
             let mut acc = mul;
             acc += res;
             acc += to_add;
-            acc += witness.w_quotient * big_to_fe::<N>(&self.neg_wrong_in_m[0]);
-            acc -= witness.m_quotients[0] * big_to_fe::<N>(&self.m_set[0]);
+            acc += w_quotient * big_to_fe::<N>(&self.neg_wrong_in_native);
+            assert_eq!(acc, N::ZERO);
+        }
+
+        // emulate circuit checks for m_1
+        {
+            let mul = mul
+                .iter()
+                .take(self.number_of_limbs)
+                .zip(self.bases_in_wrong_in_m[0].iter())
+                .enumerate()
+                .map(|(_, (limb, base))| *limb * big_to_fe::<N>(base))
+                .sum::<N>();
+
+            let res = res
+                .iter()
+                .zip(self.neg_bases_in_wrong_in_m[0].iter())
+                .enumerate()
+                .fold(N::ZERO, |acc, (_, (limb, base))| {
+                    acc + *limb * big_to_fe::<N>(base)
+                });
+
+            let to_add = to_add
+                .iter()
+                .map(|to_add| {
+                    to_add
+                        .iter()
+                        .zip(self.bases_in_wrong_in_m[0].iter())
+                        .fold(N::ZERO, |acc, (limb, base)| {
+                            acc + *limb * big_to_fe::<N>(base)
+                        })
+                })
+                .sum::<N>();
+
+            println!("xx {:?}", w_quotient);
+            println!("xx {:?}", m_quotients[0]);
+
+            let mut acc = mul;
+            acc += res;
+            acc += to_add;
+            acc += w_quotient * big_to_fe::<N>(&self.neg_wrong_in_m[0]);
+            acc -= m_quotients[0] * big_to_fe::<N>(&self.m_set[0]);
             assert_eq!(acc, N::ZERO);
         }
     }
 
-    pub fn div_witness(&self, numer: &WitnessInteger<N>, denom: &WitnessInteger<N>) {
+    pub fn div_witness(&self, numer: &Integer, denom: &Integer) -> ReductionWitness {
         let witness = {
-            let numer = self.int_from_witness(numer);
-            let denom = self.int_from_witness(denom);
+            // let numer = self.int_from_witness(numer);
+            // let denom = self.int_from_witness(denom);
             // find the result
             let res = (&numer.value * invert(&denom.value, &self.wrong)) % &self.wrong;
             let res = self.new_int(&res);
@@ -837,13 +833,6 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
                 })
                 .unzip();
 
-            let w_quotient = big_to_fe::<N>(&w_quotient);
-            let res = self.int_to_witness(res);
-            let m_quotients = m_quotients
-                .iter()
-                .map(|m_quotient| big_to_fe::<N>(m_quotient))
-                .collect::<Vec<_>>();
-
             let witness = ReductionWitness {
                 res,
                 w_quotient,
@@ -855,66 +844,77 @@ impl<W: PrimeField, N: PrimeField> COP<W, N> {
             witness
         };
 
+        witness
+    }
+
+    pub fn ver_div<N: PrimeField>(
+        &self,
+        witness: &ReductionWitness,
+        numer: &Integer,
+        denom: &Integer,
+    ) {
+        assert_eq!(modulus::<N>(), self.native);
+        let numer = numer.limbs.iter().map(big_to_fe::<N>).collect::<Vec<_>>();
+        let denom = denom.limbs.iter().map(big_to_fe::<N>).collect::<Vec<_>>();
+        let res = witness
+            .res
+            .limbs
+            .iter()
+            .map(big_to_fe::<N>)
+            .collect::<Vec<_>>();
+        let w_quotient = big_to_fe::<N>(&witness.w_quotient);
+        let m_quotients = witness
+            .m_quotients
+            .iter()
+            .map(|m_quotient| big_to_fe::<N>(m_quotient))
+            .collect::<Vec<_>>();
+
+        let mut mul = vec![N::ZERO; 2 * res.len() - 1];
+        res.iter().enumerate().for_each(|(i, res)| {
+            denom.iter().enumerate().for_each(|(j, denom)| {
+                mul[i + j] += *res * *denom;
+            })
+        });
+
         // emulate circuit checks for native modulus
         {
-            let mul = witness
-                .res
-                .limbs
+            let mul = mul
                 .iter()
+                .zip(self.bases_in_wrong.iter())
                 .enumerate()
-                .fold(N::ZERO, |acc, (i, w0_limb)| {
-                    acc + denom
-                        .limbs
-                        .iter()
-                        .enumerate()
-                        .fold(N::ZERO, |acc, (j, w1_limb)| {
-                            let base = big_to_fe::<N>(&self.bases_in_wrong[i + j]);
-                            acc + base * w0_limb * w1_limb
-                        })
+                .map(|(_, (limb, base))| *limb * big_to_fe::<N>(base))
+                .sum::<N>();
+
+            let numer = numer
+                .iter()
+                .zip(self.neg_bases_in_wrong.iter())
+                .fold(N::ZERO, |acc, (limb, base)| {
+                    acc + *limb * big_to_fe::<N>(base)
                 });
 
-            let numer = numer.limbs.iter().zip(self.neg_bases_in_wrong.iter()).fold(
-                N::ZERO,
-                |acc, (limb, base)| {
-                    let base = big_to_fe::<N>(base);
-                    acc + base * limb
-                },
-            );
-
-            let acc = mul + numer + witness.w_quotient * big_to_fe::<N>(&self.neg_wrong_in_native);
+            let acc = mul + numer + w_quotient * big_to_fe::<N>(&self.neg_wrong_in_native);
 
             assert_eq!(acc, N::ZERO);
         }
 
         // emulate circuit checks for m_1
         {
-            let mul = witness
-                .res
-                .limbs
+            let mul = mul
                 .iter()
+                .zip(self.bases_in_wrong_in_m[0].iter())
                 .enumerate()
-                .fold(N::ZERO, |acc, (i, w0_limb)| {
-                    acc + denom
-                        .limbs
-                        .iter()
-                        .enumerate()
-                        .fold(N::ZERO, |acc, (j, w1_limb)| {
-                            let base = big_to_fe::<N>(&self.bases_in_wrong_in_m[0][i + j]);
-                            acc + base * w0_limb * w1_limb
-                        })
-                });
+                .map(|(_, (limb, base))| *limb * big_to_fe::<N>(base))
+                .sum::<N>();
 
             let numer = numer
-                .limbs
                 .iter()
                 .zip(self.neg_bases_in_wrong_in_m[0].iter())
                 .fold(N::ZERO, |acc, (limb, base)| {
-                    let base = big_to_fe::<N>(base);
-                    acc + base * limb
+                    acc + *limb * big_to_fe::<N>(base)
                 });
 
-            let acc = mul + numer + witness.w_quotient * big_to_fe::<N>(&self.neg_wrong_in_m[0])
-                - witness.m_quotients[0] * big_to_fe::<N>(&self.m_set[0]);
+            let acc = mul + numer + w_quotient * big_to_fe::<N>(&self.neg_wrong_in_m[0])
+                - m_quotients[0] * big_to_fe::<N>(&self.m_set[0]);
             assert_eq!(acc, N::ZERO);
         }
     }
