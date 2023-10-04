@@ -26,10 +26,10 @@ fn run_cop<W: PrimeField, N: PrimeField>() {
     //     acc
     // };
 
-    use rand_core::SeedableRng;
-    use rand_xorshift::XorShiftRng;
-    let rng = &mut XorShiftRng::from_seed([1u8; 16]);
-    // let rng = &mut OsRng;
+    // use rand_core::SeedableRng;
+    // use rand_xorshift::XorShiftRng;
+    // let rng = &mut XorShiftRng::from_seed([1u8; 16]);
+    let rng = &mut OsRng;
 
     let wrong_modulus = &modulus::<W>();
     let native_modulus = &modulus::<N>();
@@ -47,14 +47,13 @@ fn run_cop<W: PrimeField, N: PrimeField>() {
 
     let w0 = cop.rand(rng);
     let w1 = cop.rand(rng);
-    // let w0 = cop.new_int(&BigUint::from(2));
-    // let w1 = cop.new_int(&BigUint::from(5));
-    let w0 = double_n(0, &w0);
-    let w1 = double_n(0, &w1);
-    // let witness = &cop.red_witness(&w0);
-    // cop.ver_red::<N>(witness, &w0);
-    // let witness = &cop.red_witness(&w1);
-    // cop.ver_red::<N>(witness, &w1);
+
+    let w0 = double_n(3, &w0);
+    let w1 = double_n(3, &w1);
+    let witness = &cop.red_witness(&w0);
+    cop.ver_red::<N>(witness, &w0);
+    let witness = &cop.red_witness(&w1);
+    cop.ver_red::<N>(witness, &w1);
     let witness = &cop.mul_witness(&w0, &w1, &[]);
     cop.ver_mul::<N>(witness, &w0, &w1, &[]);
     let witness = &cop.div_witness(&w0, &w1);

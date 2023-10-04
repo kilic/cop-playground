@@ -48,29 +48,6 @@ impl std::fmt::Debug for Integer {
     }
 }
 
-// impl<N: PrimeField> std::fmt::Debug for Integer {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         let mut debug = f.debug_struct("Integer");
-
-//         debug.field(
-//             "max:    ",
-//             &format!("{}, 0x{}", self.max.bits(), self.max.to_str_radix(16)),
-//         );
-
-//         self.limbs
-//             .iter()
-//             .zip(self.max_values.iter())
-//             .enumerate()
-//             .for_each(|(_, (limb, max))| {
-//                 debug.field(
-//                     "limb:   ",
-//                     &format!("{}, 0x{}", max.bits(), fe_to_big(limb).to_str_radix(16)),
-//                 );
-//             });
-//         debug.finish()
-//     }
-// }
-
 impl Integer {
     pub fn add(&self, other: &Self) -> Self {
         let mut limbs = Vec::with_capacity(self.limbs.len());
@@ -183,35 +160,6 @@ impl COP {
             value: value.clone(),
         }
     }
-
-    // pub fn int_from_witness(&self, integer: &Integer) -> Integer {
-    //     let limbs = integer
-    //         .limbs
-    //         .iter()
-    //         .map(|limb| fe_to_big(limb))
-    //         .collect::<Vec<_>>();
-    //     let value = compose(&limbs, self.limb_size);
-
-    //     Integer {
-    //         max_values: integer.max_values.clone(),
-    //         max: compose(&integer.max_values, self.limb_size),
-    //         limbs,
-    //         value,
-    //     }
-    // }
-
-    // pub fn int_to_witness(&self, integer: Integer) -> Integer {
-    //     let limbs = integer
-    //         .limbs
-    //         .iter()
-    //         .map(|limb| big_to_fe::<N>(limb))
-    //         .collect::<Vec<_>>();
-    //     Integer            max_values: integer.max_values.clone(),
-    //         max: integer.max,
-    //         limbs,
-    //         native: big_to_fe::<N>(&self.native),
-    //     }
-    // }
 
     pub fn base(&self) -> &BigUint {
         &self.bases[1]
@@ -471,13 +419,6 @@ impl COP {
                 })
                 .unzip();
 
-            // let w_quotient = big_to_fe::<N>(&w_quotient);
-            // let res = self.int_to_witness(res);
-            // let m_quotients = m_quotients
-            //     .iter()
-            //     .map(|m_quotient| big_to_fe::<N>(m_quotient))
-            //     .collect::<Vec<_>>();
-
             let witness = ReductionWitness {
                 res,
                 w_quotient,
@@ -562,11 +503,6 @@ impl COP {
 
     pub fn mul_witness(&self, w0: &Integer, w1: &Integer, to_add: &[Integer]) -> ReductionWitness {
         let witness = {
-            // let to_add = to_add
-            //     .iter()
-            //     .map(|to_add| self.int_from_witness(to_add))
-            //     .collect::<Vec<_>>();
-
             // find the result
             let res = {
                 let mul = &w0.value * &w1.value;
@@ -669,6 +605,8 @@ impl COP {
         to_add: &[Integer],
     ) {
         assert_eq!(modulus::<N>(), self.native);
+
+        // parse big ints into field elements
         let w0 = w0.limbs.iter().map(big_to_fe::<N>).collect::<Vec<_>>();
         let w1 = w1.limbs.iter().map(big_to_fe::<N>).collect::<Vec<_>>();
         let res = witness
@@ -688,6 +626,7 @@ impl COP {
             .map(|to_add| to_add.limbs.iter().map(big_to_fe::<N>).collect::<Vec<_>>())
             .collect::<Vec<_>>();
 
+        // `n^2` degree 2 composition
         let mut mul = vec![N::ZERO; 2 * w0.len() - 1];
         w0.iter().enumerate().for_each(|(i, w0)| {
             w1.iter().enumerate().for_each(|(j, w1)| {
@@ -697,6 +636,7 @@ impl COP {
 
         // emulate circuit checks for native modulus
         {
+            // `2n-1` degree 1 composition
             let mul = mul
                 .iter()
                 .zip(self.bases_in_wrong.iter())
@@ -704,6 +644,7 @@ impl COP {
                 .map(|(_, (limb, base))| *limb * big_to_fe::<N>(base))
                 .sum::<N>();
 
+            // `n` degree 1 composition
             let res = res
                 .iter()
                 .zip(self.neg_bases_in_wrong.iter())
@@ -712,6 +653,7 @@ impl COP {
                     acc + *limb * big_to_fe::<N>(base)
                 });
 
+            // `n` degree 1 composition for each
             let to_add = to_add
                 .iter()
                 .map(|to_add| {
@@ -727,20 +669,24 @@ impl COP {
             let mut acc = mul;
             acc += res;
             acc += to_add;
+
+            // 1 additional quotient contribution
             acc += w_quotient * big_to_fe::<N>(&self.neg_wrong_in_native);
+
             assert_eq!(acc, N::ZERO);
         }
 
         // emulate circuit checks for m_1
         {
+            // `2n-1` degree 1 composition
             let mul = mul
                 .iter()
-                .take(self.number_of_limbs)
                 .zip(self.bases_in_wrong_in_m[0].iter())
                 .enumerate()
                 .map(|(_, (limb, base))| *limb * big_to_fe::<N>(base))
                 .sum::<N>();
 
+            // `n` degree 1 composition
             let res = res
                 .iter()
                 .zip(self.neg_bases_in_wrong_in_m[0].iter())
@@ -749,6 +695,7 @@ impl COP {
                     acc + *limb * big_to_fe::<N>(base)
                 });
 
+            // `n` degree 1 composition for each
             let to_add = to_add
                 .iter()
                 .map(|to_add| {
@@ -761,14 +708,14 @@ impl COP {
                 })
                 .sum::<N>();
 
-            println!("xx {:?}", w_quotient);
-            println!("xx {:?}", m_quotients[0]);
-
             let mut acc = mul;
             acc += res;
             acc += to_add;
+
+            // 2 additional quotient contribution
             acc += w_quotient * big_to_fe::<N>(&self.neg_wrong_in_m[0]);
             acc -= m_quotients[0] * big_to_fe::<N>(&self.m_set[0]);
+
             assert_eq!(acc, N::ZERO);
         }
     }
