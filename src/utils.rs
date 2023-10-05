@@ -5,6 +5,20 @@ use num_bigint::BigUint;
 use num_integer::Integer;
 use num_traits::{One, Zero};
 
+//  for<'a> Mul<&'a Self, Output = Self>
+pub(crate) fn schoolbook<T: Clone>(a: &[T], b: &[T]) -> Vec<Vec<T>>
+where
+    for<'a> &'a T: std::ops::Mul<&'a T, Output = T>,
+{
+    let mut wide = vec![vec![]; a.len() + b.len() - 1];
+    for (i, a) in a.iter().enumerate() {
+        for (j, b) in b.iter().enumerate() {
+            wide[i + j].push(a * b);
+        }
+    }
+    wide
+}
+
 pub(crate) fn _div_exact(a: &BigUint, b: &BigUint) -> BigUint {
     let (q, r) = a.div_rem(b);
     assert!(r.is_zero());
@@ -41,11 +55,11 @@ pub(crate) fn compose(input: &[BigUint], limb_size: usize) -> BigUint {
         .fold(BigUint::zero(), |acc, val| (acc << limb_size) + val)
 }
 
-pub fn modulus<F: PrimeField>() -> BigUint {
+pub(crate) fn modulus<F: PrimeField>() -> BigUint {
     fe_to_big(&-F::ONE) + 1usize
 }
 
-pub fn big_to_fe<F: PrimeField>(e: &BigUint) -> F {
+pub(crate) fn big_to_fe<F: PrimeField>(e: &BigUint) -> F {
     let modulus = modulus::<F>();
     let e = e % modulus;
     let bytes = e.to_bytes_le();
@@ -54,6 +68,6 @@ pub fn big_to_fe<F: PrimeField>(e: &BigUint) -> F {
     F::from_repr(repr).unwrap()
 }
 
-pub fn fe_to_big<F: PrimeField>(fe: &F) -> BigUint {
+pub(crate) fn fe_to_big<F: PrimeField>(fe: &F) -> BigUint {
     BigUint::from_bytes_le(fe.to_repr().as_ref())
 }
